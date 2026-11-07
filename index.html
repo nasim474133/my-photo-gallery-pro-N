@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#152238">
+<meta name="description" content="My Photo Gallery Pro - offline photo and video organizer">
+<link rel="manifest" href="manifest.webmanifest">
+<title>My Photo Gallery Pro</title>
+<style>
+:root{--bg:#f3f6fb;--card:#fff;--ink:#17243a;--muted:#65738a;--accent:#2563eb;--line:#e3e9f2;--danger:#c62828}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Noto Sans Bengali",sans-serif}
+header{background:#152238;color:white;padding:20px 16px 16px;position:sticky;top:0;z-index:5;box-shadow:0 2px 10px #0002}
+h1{font-size:21px;margin:0 0 5px}.sub{font-size:12px;color:#c7d2e4}
+main{max-width:900px;margin:auto;padding:14px}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+button,.filebtn{border:0;border-radius:12px;padding:11px 14px;font-weight:650;background:var(--accent);color:#fff;font-size:14px;cursor:pointer}
+button.secondary,.filebtn.secondary{background:#e8eef9;color:#1d355b}button.danger{background:#feecec;color:var(--danger)}
+input[type=file]{display:none}.stats{display:flex;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin:8px 0 14px}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.item{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;position:relative}
+.item img,.item video{display:block;width:100%;aspect-ratio:1;object-fit:cover;background:#dce3ed}
+.item .meta{padding:7px;font-size:12px;display:flex;justify-content:space-between;gap:4px}
+.item input{position:absolute;top:8px;left:8px;width:21px;height:21px;accent-color:var(--accent)}
+.item .num{font-weight:750}
+.empty{background:white;border:1px dashed #b8c5d8;padding:30px 16px;text-align:center;border-radius:16px;color:var(--muted);line-height:1.6}
+.notice{font-size:12px;color:var(--muted);line-height:1.55;margin:12px 2px}
+.overlay{position:fixed;inset:0;background:#101b2ddd;z-index:20;display:grid;place-items:center;padding:18px}
+.panel{background:white;width:min(100%,390px);border-radius:18px;padding:22px;box-shadow:0 15px 50px #0004}
+.panel h2{margin:0 0 8px;font-size:20px}.panel p{font-size:13px;color:var(--muted);line-height:1.5}
+.panel input{width:100%;padding:13px;border:1px solid var(--line);border-radius:10px;font-size:18px;margin:8px 0}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#17243a;color:white;padding:10px 16px;border-radius:20px;z-index:30;display:none;font-size:13px;max-width:90%;text-align:center}
+@media(min-width:650px){.grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}}
+</style>
+</head>
+<body>
+<header><h1>My Photo Gallery Pro</h1><div class="sub">Offline Gallery • Original Quality • Private on this device</div></header>
+<main>
+  <div class="toolbar">
+    <label class="filebtn" for="picker">＋ ছবি / ভিডিও যোগ করো</label>
+    <input id="picker" type="file" accept="image/*,video/*" multiple>
+    <button class="secondary" id="selectAll">সব নির্বাচন</button>
+    <button class="secondary" id="share">Facebook-এ Share</button>
+    <button class="danger" id="remove">মুছে ফেলো</button>
+    <button class="secondary" id="lockSettings">PIN সেটিংস</button>
+  </div>
+  <div class="stats"><span id="count">০টি মিডিয়া</span><span id="selectedCount">০টি নির্বাচিত</span><span>Original file রাখা হয়</span></div>
+  <section id="gallery" class="grid"></section>
+  <p class="notice">ছবি/ভিডিও এই ব্রাউজারের স্থানীয় স্টোরেজে থাকে। ব্রাউজারের ডেটা মুছে ফেললে মিডিয়াও মুছে যেতে পারে। নিয়মিত ফোনে মূল কপি রাখুন। Facebook Share চাপলে Android Share Sheet খুলবে; সেখান থেকে Facebook এবং উপলব্ধ থাকলে Profile বা Page বেছে নিন। Facebook নিজে Page নির্বাচন সীমাবদ্ধ করতে পারে।</p>
+</main>
+<div id="lock" class="overlay" hidden>
+ <div class="panel"><h2 id="lockTitle">My Photo Gallery Pro</h2><p id="lockText">অ্যাপ খুলতে PIN দিন।</p>
+ <input id="pinInput" type="password" inputmode="numeric" maxlength="12" placeholder="PIN">
+ <button id="unlockBtn" style="width:100%">Unlock</button>
+ <button id="bioBtn" class="secondary" style="width:100%;margin-top:8px" hidden>Fingerprint / Screen Lock</button>
+ </div>
+</div>
+<div id="toast"></div>
+<script>
+const DB_NAME='mpgp-db', STORE='media', META='settings';
+let db, items=[], selected=new Set(), unlocked=false;
+const $=id=>document.getElementById(id);
+function toast(s){$('toast').textContent=s;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2600)}
+function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains(STORE))d.createObjectStore(STORE,{keyPath:'id',autoIncrement:true});if(!d.objectStoreNames.contains(META))d.createObjectStore(META,{keyPath:'key'})};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
+function req(p){return new Promise((res,rej)=>{p.onsuccess=()=>res(p.result);p.onerror=()=>rej(p.error)})}
+async function all(){items=await req(db.transaction(STORE).objectStore(STORE).getAll());items.sort((a,b)=>a.id-b.id);render()}
+async function saveFile(file){return req(db.transaction(STORE,'readwrite').objectStore(STORE).add({name:file.name,type:file.type,blob:file,added:Date.now()}))}
+async function setting(key){return req(db.transaction(META).objectStore(META).get(key))}
+async function putSetting(key,value){return req(db.transaction(META,'readwrite').objectStore(META).put({key,value}))}
+function render(){
+ $('count').textContent=`${items.length}টি মিডিয়া`;$('selectedCount').textContent=`${selected.size}টি নির্বাচিত`;
+ const g=$('gallery');g.innerHTML='';
+ if(!items.length){g.innerHTML='<div class="empty" style="grid-column:1/-1">এখনো কোনো ছবি বা ভিডিও যোগ করা হয়নি।<br>উপরের “ছবি / ভিডিও যোগ করো” চাপুন।</div>';return}
+ items.forEach((it,i)=>{const card=document.createElement('article');card.className='item';
+ const url=URL.createObjectURL(it.blob);let media;
+ if(it.type.startsWith('video/')){media=document.createElement('video');media.src=url;media.muted=true;media.playsInline=true}
+ else{media=document.createElement('img');media.src=url;media.loading='lazy';media.alt=it.name}
+ const cb=document.createElement('input');cb.type='checkbox';cb.checked=selected.has(it.id);cb.setAttribute('aria-label',`Select ${i+1}`);cb.onchange=()=>{cb.checked?selected.add(it.id):selected.delete(it.id);renderCounts()};
+ const meta=document.createElement('div');meta.className='meta';meta.innerHTML=`<span class="num">#${i+1}</span><span>${it.type.startsWith('video/')?'ভিডিও':'ছবি'}</span>`;
+ card.append(media,cb,meta);g.append(card)
+ })
+}
+function renderCounts(){$('selectedCount').textContent=`${selected.size}টি নির্বাচিত`}
+$('picker').onchange=async e=>{const files=[...e.target.files];for(const f of files){if(!f.type.startsWith('image/')&&!f.type.startsWith('video/'))continue;await saveFile(f)}e.target.value='';await all();toast(`${files.length}টি ফাইল যোগ হয়েছে`)}
+$('selectAll').onclick=()=>{if(selected.size===items.length)selected.clear();else items.forEach(x=>selected.add(x.id));render()}
+$('remove').onclick=async()=>{if(!selected.size)return toast('আগে মিডিয়া নির্বাচন করুন');if(!confirm(`${selected.size}টি ফাইল মুছে ফেলবেন?`))return;const tx=db.transaction(STORE,'readwrite');selected.forEach(id=>tx.objectStore(STORE).delete(id));await new Promise(r=>tx.oncomplete=r);selected.clear();await all();toast('নির্বাচিত ফাইল মুছে ফেলা হয়েছে')}
+$('share').onclick=async()=>{
+ const chosen=items.filter(x=>selected.has(x.id));if(!chosen.length)return toast('আগে ছবি/ভিডিও নির্বাচন করুন');
+ const files=chosen.map((x,i)=>new File([x.blob],x.name||`media-${i+1}`,{type:x.type}));
+ try{
+  if(navigator.canShare&&navigator.canShare({files})&&navigator.share){await navigator.share({files,title:'My Photo Gallery Pro',text:'Shared from My Photo Gallery Pro'});}
+  else if(chosen.length===1){const a=document.createElement('a');a.href=URL.createObjectURL(chosen[0].blob);a.download=chosen[0].name||'media';a.click();toast('এই ব্রাউজারে সরাসরি Share সমর্থিত নয়; ফাইল ডাউনলোড হয়েছে।')}
+  else toast('এই ব্রাউজারে একসঙ্গে একাধিক ফাইল Share সমর্থিত নয়। Chrome ব্যবহার করুন।')
+ }catch(e){if(e.name!=='AbortError')toast('Share করা যায়নি: '+e.message)}
+};
+async function hash(s){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}
+async function initLock(){
+ const s=await setting('pinHash');
+ if(!s){$('lock').hidden=true;unlocked=true;return}
+ $('lock').hidden=false;$('lockTitle').textContent='অ্যাপ লক করা আছে';$('lockText').textContent='তোমার PIN দিয়ে অ্যাপ খুলুন।';
+ if(window.PublicKeyCredential && navigator.credentials){$('bioBtn').hidden=false}
+}
+$('unlockBtn').onclick=async()=>{const s=await setting('pinHash');if(await hash($('pinInput').value)===(s?.value)){unlocked=true;$('lock').hidden=true;$('pinInput').value='';toast('Unlocked')}else toast('PIN সঠিক নয়')}
+$('pinInput').addEventListener('keydown',e=>{if(e.key==='Enter')$('unlockBtn').click()});
+$('lockSettings').onclick=async()=>{
+ const current=await setting('pinHash');
+ if(current){const old=prompt('বর্তমান PIN দিন');if(await hash(old||'')!==current.value)return toast('বর্তমান PIN সঠিক নয়')}
+ const pin=prompt('নতুন PIN দিন (কমপক্ষে ৪ সংখ্যা)');if(!pin||pin.length<4)return toast('কমপক্ষে ৪ অক্ষরের PIN দিন');
+ await putSetting('pinHash',await hash(pin));toast('PIN সেট হয়েছে');await initLock()
+};
+// WebAuthn biometric is a device-authenticator flow, not a guaranteed fingerprint-only prompt.
+$('bioBtn').onclick=async()=>{toast('এই ওয়েব সংস্করণে Fingerprint সরাসরি সেটআপ করা হয়নি। PIN ব্যবহার করুন।')};
+(async()=>{try{db=await openDB();await all();await initLock();if('serviceWorker'in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{})}catch(e){toast('Browser storage চালু করা যায়নি: '+e.message)}})();
+</script>
+</body></html>
